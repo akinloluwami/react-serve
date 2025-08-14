@@ -1,4 +1,4 @@
-import express, { Request, Response as ExpressResponse } from "express";
+import express, { Request, Response as ExpressResponse, RequestHandler } from "express";
 import { ReactNode } from "react";
 import { watch } from "fs";
 
@@ -117,67 +117,92 @@ export function serve(element: ReactNode) {
   const app = express();
   app.use(express.json());
 
+  // Unified output handler to reduce duplication across methods
+  const sendResponseFromOutput = (
+    res: ExpressResponse,
+    output: any
+  ): void => {
+    if (!output) {
+      if (!res.headersSent) {
+        res.status(500).json({ error: "No response generated" });
+      }
+      return;
+    }
+
+    if (typeof output === "object") {
+      const isResponseElement = Boolean(
+        output.type && (output.type === "Response" || output.type?.name === "Response")
+      );
+
+      if (isResponseElement) {
+        const { status = 200, json } = output.props || {};
+        res.status(status);
+        if (json !== undefined) {
+          res.json(json);
+        } else {
+          res.end();
+        }
+        return;
+      }
+
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Invalid response format" });
+      }
+      return;
+    }
+
+    // Primitive outputs are sent as text
+    res.send(String(output));
+  };
+
+  // Shared request handler factory used for all HTTP methods
+  const createExpressHandler = (handler: Function) => {
+    const wrapped: RequestHandler = async (
+      req: Request,
+      res: ExpressResponse
+    ) => {
+      routeContext = {
+        req,
+        res,
+        params: req.params,
+        query: req.query,
+        body: req.body,
+      };
+      console.log(routeContext);
+      try {
+        const output = await handler();
+        sendResponseFromOutput(res, output);
+      } catch (error) {
+        console.error("Route handler error:", error);
+        if (!res.headersSent) {
+          res.status(500).json({ error: "Internal server error" });
+        }
+      } finally {
+        routeContext = null;
+      }
+    };
+    return wrapped;
+  };
+
+  // Register all routes for supported HTTP methods
   for (const route of routes) {
     const method = route.method.toLowerCase();
-    if (method === "get") {
-      app.get(route.path, async (req: Request, res: ExpressResponse) => {
-        routeContext = {
-          req,
-          res,
-          params: req.params,
-          query: req.query,
-          body: req.body,
-        };
-        try {
-          const output = await route.handler();
+    console.log(method);
+    const registrar: Record<string, (path: string, ...handlers: RequestHandler[]) => any> = {
+      get: app.get.bind(app),
+      post: app.post.bind(app),
+      put: app.put.bind(app),
+      patch: app.patch.bind(app),
+      delete: app.delete.bind(app),
+      options: app.options.bind(app),
+      head: app.head.bind(app),
+    };
 
-          // Handle Response component
-          if (output && typeof output === "object") {
-            // Check if it's a React element with our Response type
-            if (
-              output.type &&
-              (output.type.name === "Response" || output.type === "Response")
-            ) {
-              const { status = 200, json } = output.props || {};
-              res.status(status);
-              if (json !== undefined) {
-                res.json(json);
-              } else {
-                res.end();
-              }
-            }
-            // Check if it's our custom Response object format
-            else if (output.type === "Response") {
-              const { status = 200, json } = output.props || {};
-              res.status(status);
-              if (json !== undefined) {
-                res.json(json);
-              } else {
-                res.end();
-              }
-            } else {
-              // If no response was sent, send a default response
-              if (!res.headersSent) {
-                res.status(500).json({ error: "Invalid response format" });
-              }
-            }
-          } else if (output && typeof output !== "object") {
-            res.send(String(output));
-          } else {
-            // If no response was sent, send a default response
-            if (!res.headersSent) {
-              res.status(500).json({ error: "No response generated" });
-            }
-          }
-        } catch (error) {
-          console.error("Route handler error:", error);
-          if (!res.headersSent) {
-            res.status(500).json({ error: "Internal server error" });
-          }
-        } finally {
-          routeContext = null;
-        }
-      });
+    const register = registrar[method];
+    if (register) {
+      register(route.path, createExpressHandler(route.handler));
+    } else {
+      console.warn(`Unsupported HTTP method: ${route.method}`);
     }
   }
 
