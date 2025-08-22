@@ -1,4 +1,8 @@
-import express, { Request, Response as ExpressResponse, RequestHandler } from "express";
+import express, {
+  Request,
+  Response as ExpressResponse,
+  RequestHandler,
+} from "express";
 import { ReactNode } from "react";
 import { watch } from "fs";
 import cors from "cors";
@@ -153,7 +157,9 @@ function processElement(
         const props = element.props || {};
         if (props.path && props.children) {
           if (!props.method) {
-            throw new Error(`Route with path "${props.path}" is missing a required "method" property`);
+            throw new Error(
+              `Route with path "${props.path}" is missing a required "method" property`
+            );
           }
           const fullPath = `${pathPrefix}${props.path}`;
 
@@ -212,10 +218,7 @@ export function serve(element: ReactNode) {
   }
 
   // Unified output handler to reduce duplication across methods
-  const sendResponseFromOutput = (
-    res: ExpressResponse,
-    output: any
-  ): void => {
+  const sendResponseFromOutput = (res: ExpressResponse, output: any): void => {
     if (!output) {
       if (!res.headersSent) {
         res.status(500).json({ error: "No response generated" });
@@ -225,7 +228,8 @@ export function serve(element: ReactNode) {
 
     if (typeof output === "object") {
       const isResponseElement = Boolean(
-        output.type && (output.type === "Response" || output.type?.name === "Response")
+        output.type &&
+          (output.type === "Response" || output.type?.name === "Response")
       );
 
       if (isResponseElement) {
@@ -250,7 +254,10 @@ export function serve(element: ReactNode) {
   };
 
   // Shared request handler factory used for all HTTP methods
-  const createExpressHandler = (handler: Function, middlewares: Middleware[] = []) => {
+  const createExpressHandler = (
+    handler: Function,
+    middlewares: Middleware[] = []
+  ) => {
     const wrapped: RequestHandler = async (
       req: Request,
       res: ExpressResponse
@@ -310,7 +317,10 @@ export function serve(element: ReactNode) {
   for (const route of regularRoutes) {
     const method = route.method.toLowerCase();
 
-    const registrar: Record<string, (path: string, ...handlers: RequestHandler[]) => any> = {
+    const registrar: Record<
+      string,
+      (path: string, ...handlers: RequestHandler[]) => any
+    > = {
       get: app.get.bind(app),
       post: app.post.bind(app),
       put: app.put.bind(app),
@@ -323,34 +333,37 @@ export function serve(element: ReactNode) {
 
     const register = registrar[method];
     if (register) {
-      register(route.path, createExpressHandler(route.handler, route.middlewares));
+      register(
+        route.path,
+        createExpressHandler(route.handler, route.middlewares)
+      );
     } else {
       console.warn(`Unsupported HTTP method: ${route.method}`);
     }
   }
 
-app.use((req: Request, res: ExpressResponse, next: any) => {
-  const path = req.path;
-  if (methodsByPath[path] && !methodsByPath[path].includes(req.method)) {
-    res.set('Allow', methodsByPath[path].join(', '));
+  app.use((req: Request, res: ExpressResponse, next: any) => {
+    const path = req.path;
+    if (methodsByPath[path] && !methodsByPath[path].includes(req.method)) {
+      res.set("Allow", methodsByPath[path].join(", "));
 
-    console.log(
-      `\n🚫  [405 Method Not Allowed]\n` +
-      `   ✦ Path: ${path}\n` +
-      `   ✦ Tried: ${req.method}\n` +
-      `   ✦ Allowed: ${methodsByPath[path].join(', ')}\n`
-    );
+      console.log(
+        `\n🚫  [405 Method Not Allowed]\n` +
+          `   ✦ Path: ${path}\n` +
+          `   ✦ Tried: ${req.method}\n` +
+          `   ✦ Allowed: ${methodsByPath[path].join(", ")}\n`
+      );
 
-    res.status(405).json({
-      error: "Method Not Allowed",
-      message: `Method ${req.method} is not allowed for path ${path}`,
-      path,
-      method: req.method
-    });
-  } else {
-    next();
-  }
-});
+      res.status(405).json({
+        error: "Method Not Allowed",
+        message: `Method ${req.method} is not allowed for path ${path}`,
+        path,
+        method: req.method,
+      });
+    } else {
+      next();
+    }
+  });
 
   const hasCustomWildcard = wildcardRoutes.length > 0;
 
@@ -387,7 +400,8 @@ app.use((req: Request, res: ExpressResponse, next: any) => {
             sendResponseFromOutput(res, output);
           } catch (error) {
             console.error("Wildcard route handler error:", error);
-            if (!res.headersSent) res.status(500).json({ error: "Internal server error" });
+            if (!res.headersSent)
+              res.status(500).json({ error: "Internal server error" });
           } finally {
             routeContext = null;
           }
@@ -428,7 +442,9 @@ app.use((req: Request, res: ExpressResponse, next: any) => {
       watch(watchPath, { recursive: true }, (eventType, filename) => {
         if (
           filename &&
-          (filename.endsWith(".ts") || filename.endsWith(".tsx"))
+          (filename.endsWith(".ts") || filename.endsWith(".tsx")) &&
+          !filename.includes("node_modules") &&
+          !filename.includes(".git")
         ) {
           console.log(`🔄 File changed: ${filename} - Restarting server...`);
           server.close(() => {
