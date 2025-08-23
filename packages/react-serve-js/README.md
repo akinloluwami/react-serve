@@ -157,6 +157,41 @@ Groups routes together with a shared path prefix.
 </RouteGroup>
 ```
 
+### `<FileRouter>`
+
+Automatically creates routes based on your file structure (file-based routing).
+
+**Props:**
+
+- `routesDir: string` - Directory path containing route files
+- `middleware?: MiddlewareFunction | MiddlewareFunction[]` - Optional middleware to apply to all routes
+
+**Example:**
+
+```tsx
+<App port={6969}>
+  <FileRouter routesDir="./src/routes" middleware={loggingMiddleware} />
+</App>
+```
+
+**File Structure Example:**
+```
+src/routes/
+├── index.tsx              → GET /
+├── users/
+│   ├── index.tsx          → GET /users
+│   ├── [id].tsx           → GET /users/:id
+│   └── users.post.tsx     → POST /users
+└── api/
+    └── health.tsx         → GET /api/health
+```
+
+**Route Patterns:**
+- `index.tsx` → `/`
+- `[param].tsx` → `/:param`
+- `file.get.tsx` → `GET /file`
+- `file.post.tsx` → `POST /file`
+
 ### `<Response>`
 
 Sends a response back to the client.
@@ -216,4 +251,5 @@ Retrieve data from the request context (available in route handlers and middlewa
 - 🧩 **Composable** - Use React patterns for API logic
 - �️ **Middleware Support** - Authentication, logging, and custom middleware
 - 🗂️ **Route Grouping** - Organize routes with shared prefixes
+- 📁 **File-Based Routing** - Automatic routes from file structure
 - �📦 **Zero Config** - Works out of the box
