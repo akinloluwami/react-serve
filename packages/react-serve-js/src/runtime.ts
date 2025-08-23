@@ -94,7 +94,10 @@ function parseRouteFromFilename(filename: string): {
   return { path, method };
 }
 
-function scanRoutesDirectory(dir: string, basePath: string = ""): void {
+async function scanRoutesDirectory(
+  dir: string,
+  basePath: string = ""
+): Promise<void> {
   if (!existsSync(dir)) return;
 
   const items = readdirSync(dir);
@@ -106,7 +109,7 @@ function scanRoutesDirectory(dir: string, basePath: string = ""): void {
     if (stat.isDirectory()) {
       // Handle route groups (directories)
       const newBasePath = basePath ? `${basePath}/${item}` : item;
-      scanRoutesDirectory(fullPath, newBasePath);
+      await scanRoutesDirectory(fullPath, newBasePath);
     } else if (stat.isFile()) {
       // Handle route files
       const ext = extname(item);
@@ -119,14 +122,19 @@ function scanRoutesDirectory(dir: string, basePath: string = ""): void {
 
         // Import and register the route
         try {
-          const routeModule = require(fullPath);
+          console.log(`Loading route from: ${fullPath}`);
+          // Use dynamic import for ES modules
+          const routeModule = await import(fullPath);
           const handler =
             routeModule.default || routeModule.handler || routeModule;
 
           if (typeof handler === "function") {
+            const routePath =
+              fullRoutePath === "index" ? "/" : `/${fullRoutePath}`;
+            console.log(`Registered route: ${method} ${routePath}`);
             routes.push({
               method,
-              path: fullRoutePath === "index" ? "/" : `/${fullRoutePath}`,
+              path: routePath,
               handler,
               middlewares: [],
             });
@@ -140,15 +148,17 @@ function scanRoutesDirectory(dir: string, basePath: string = ""): void {
 }
 
 // Component processor
-function processElement(
+async function processElement(
   element: any,
   pathPrefix: string = "",
   middlewares: Middleware[] = []
-): void {
+): Promise<void> {
   if (!element) return;
 
   if (Array.isArray(element)) {
-    element.forEach((el) => processElement(el, pathPrefix, middlewares));
+    for (const el of element) {
+      await processElement(el, pathPrefix, middlewares);
+    }
     return;
   }
 
@@ -157,7 +167,7 @@ function processElement(
     if (typeof element.type === "function") {
       // Call the function component to get its JSX result
       const result = element.type(element.props || {});
-      processElement(result, pathPrefix, middlewares);
+      await processElement(result, pathPrefix, middlewares);
       return;
     }
 
@@ -211,7 +221,7 @@ function processElement(
           });
 
           // Second pass: process all children with the accumulated middlewares
-          children.forEach((child: any) => {
+          for (const child of children) {
             // Skip middleware components in second pass since we already processed them
             if (
               !(
@@ -221,9 +231,9 @@ function processElement(
                   (child.type && child.type.name === "Middleware"))
               )
             ) {
-              processElement(child, groupPrefix, groupMiddlewares);
+              await processElement(child, groupPrefix, groupMiddlewares);
             }
-          });
+          }
         }
         return;
       }
@@ -234,9 +244,10 @@ function processElement(
       ) {
         // Handle FileRouter component
         const props = element.props || {};
+        console.log("Processing FileRouter with routesDir:", props.routesDir);
         if (props.routesDir) {
           // Scan the routes directory for file-based routes
-          scanRoutesDirectory(props.routesDir);
+          await scanRoutesDirectory(props.routesDir);
 
           // Apply middleware to all file-based routes if provided
           if (props.middleware) {
@@ -290,23 +301,23 @@ function processElement(
     // Process children for non-RouteGroup elements
     if (element.props && element.props.children) {
       if (Array.isArray(element.props.children)) {
-        element.props.children.forEach((child: any) =>
-          processElement(child, pathPrefix, middlewares)
-        );
+        for (const child of element.props.children) {
+          await processElement(child, pathPrefix, middlewares);
+        }
       } else {
-        processElement(element.props.children, pathPrefix, middlewares);
+        await processElement(element.props.children, pathPrefix, middlewares);
       }
     }
   }
 }
 
-export function serve(element: ReactNode) {
+export async function serve(element: ReactNode) {
   // Clear routes and config before processing
   routes.length = 0;
   appConfig = {};
 
   // Process the React element tree to extract routes and config
-  processElement(element);
+  await processElement(element);
 
   const port = appConfig.port || 6969;
 

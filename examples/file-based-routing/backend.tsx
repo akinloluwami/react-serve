@@ -22,4 +22,4 @@ export default function Backend() {
 }
 
 // Start the server
-serve(Backend());
+serve(Backend()).catch(console.error);
