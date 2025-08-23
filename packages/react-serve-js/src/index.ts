@@ -76,3 +76,13 @@ export function RouteGroup({
 }): React.ReactElement {
   return { type: "RouteGroup", props: { children, prefix } } as any;
 }
+
+export function FileRouter({
+  routesDir,
+  middleware,
+}: {
+  routesDir: string;
+  middleware?: import("./runtime").Middleware | import("./runtime").Middleware[];
+}): React.ReactElement {
+  return { type: "FileRouter", props: { routesDir, middleware } } as any;
+}
