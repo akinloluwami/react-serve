@@ -40,33 +40,42 @@ Bootstraps the server using a React element tree.
 #### Components
 
 ##### `<App port={number} cors={boolean|CorsOptions}>`
+
 Defines the application and sets the port (default: 9000). The `cors` prop enables CORS middleware - set to `true` for default configuration or provide custom CORS options.
 
 ##### `<RouteGroup prefix={string}>`
+
 Groups routes under a common path prefix and/or shared middleware.
 
 ##### `<Route method="GET|POST|..." path="/path" middleware={fn|fn[]}>`
+
 Defines a route. Children is the handler function/component.
 
 ##### `<Middleware use={fn}>`
+
 Declares a middleware function for a group or route.
 
-##### `<Response status={number} json={any}>`
-Sends a response with the given status and JSON body.
+##### `<Response status={number} json={any} text={string} html={string} headers={Record<string,string>} redirect={string}>`
+
+Sends a response. Supports JSON, text, HTML, custom headers, and redirects.
 
 #### Hooks
 
 ##### `useRoute()`
+
 Returns the current route context:
+
 - `req`: Express Request
 - `res`: Express Response
 - `params`, `query`, `body`: Request data
 - `middlewareContext`: Map for sharing data
 
 ##### `useSetContext(key, value)`
+
 Sets a value in the middleware context map.
 
 ##### `useContext(key)`
+
 Retrieves a value from the middleware context map.
 
 #### Middleware Type
@@ -74,6 +83,7 @@ Retrieves a value from the middleware context map.
 ```ts
 type Middleware = (req: Request, next: () => any) => any;
 ```
+
 - Call `next()` to continue to the next middleware/handler.
 - Return a value to short-circuit and send a response.
 
@@ -88,7 +98,7 @@ function HelloRoute() {
 }
 
 serve(
-  <App 
+  <App
     port={6969}
     cors={true} // Enable CORS for all routes
   >
@@ -100,6 +110,27 @@ serve(
   </App>
 );
 ```
+
+#### File-based Routing
+
+- Routes are discovered under `<sourceRoot>/app/**` (default `src/app`).
+- A directory is routable if it contains `route.(ts|tsx|js|jsx)`.
+- Directory-to-URL mapping:
+  - `[id]` -> `:id`
+  - `[...slug]` -> `:slug` (single segment)
+  - `[[...slug]]` -> `:slug` (single segment; base path does not match)
+  - `(group)` directories are ignored in the URL, but their `middleware.*` applies
+- Middleware order for a route: global → parent dirs outer→inner → current dir → handler
+- Global middleware: `src/middleware.(ts|tsx|js|jsx)`; export a single fn or array
+- Dir middleware: `middleware.(ts|tsx|js|jsx)` inside any `app/**` folder
+- Method dispatch: named exports `GET`/`POST`/...; `default` acts as GET if GET missing
+- 405: respond with 405 and `Allow` header listing implemented methods
+- 404: default JSON when nothing matches
+
+#### Dev Runner
+
+- Reads `react-serve.config.(ts|js|cjs|mjs|tsx|jsx)`.
+- Resolves entry `<sourceRoot>/<entry>.(tsx|ts|jsx|js)` and throws if missing.
 
 #### Hot Reload
 

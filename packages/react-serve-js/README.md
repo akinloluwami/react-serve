@@ -7,64 +7,16 @@ ReactServe lets you build backend APIs using React-style JSX syntax. Define rout
 ## Installation
 
 ```bash
-npx create-react-serve my-api
+npm install react-serve-js
 ```
 
 ## Quick Start
 
-```tsx
-import {
-  App,
-  Route,
-  RouteGroup,
-  Middleware,
-  Response,
-  useRoute,
-  useSetContext,
-  useContext,
-  serve,
-  type MiddlewareFunction,
-} from "react-serve-js";
-
-// Example auth middleware
-const authMiddleware: MiddlewareFunction = (req, next) => {
-  const token = req.headers.authorization?.split(" ")[1];
-  if (!token) {
-    return <Response status={401} json={{ error: "Unauthorized" }} />;
-  }
-
-  useSetContext("user", { id: 1, name: "User" });
-  return next();
-};
-
-function Backend() {
-  return (
-    <App 
-      port={6969}
-      cors={true} // Enable CORS for all routes
-    >
-      <Route path="/" method="GET">
-        {async () => {
-          return <Response json={{ message: "Hello World!" }} />;
-        }}
-      </Route>
-
-      <RouteGroup prefix="/api">
-        <Middleware use={authMiddleware} />
-
-        <Route path="/users/:id" method="GET">
-          {async () => {
-            const { params } = useRoute();
-            const user = useContext("user");
-            return <Response json={{ userId: params.id, currentUser: user }} />;
-          }}
-        </Route>
-      </RouteGroup>
-    </App>
-  );
-}
-
-serve(Backend());
+```bash
+npx create-react-serve my-api
+cd my-api
+npm install
+npm run dev
 ```
 
 ## Components
@@ -86,6 +38,7 @@ Defines an API endpoint.
 
 - `path: string` - URL path pattern (supports Express.js route parameters)
 - `method: string` - HTTP method (GET, POST, PUT, DELETE, etc.)
+- `middleware?: MiddlewareFunction | MiddlewareFunction[]` - Route-level middleware(s) to run before the handler
 - `children: () => Promise<ReactElement>` - Async function that handles the request
 
 ### `<Middleware>`
@@ -116,10 +69,12 @@ const authMiddleware: MiddlewareFunction = (req, next) => {
 <RouteGroup prefix="/api">
   {/* Single middleware */}
   <Middleware use={authMiddleware} />
-  
+
   {/* Or multiple middleware as an array */}
   <RouteGroup prefix="/v2">
-    <Middleware use={[loggingMiddleware, rateLimitMiddleware, authMiddleware]} />
+    <Middleware
+      use={[loggingMiddleware, rateLimitMiddleware, authMiddleware]}
+    />
     <Route path="/users" method="GET">
       {() => {
         const user = useContext("user");
@@ -164,7 +119,52 @@ Sends a response back to the client.
 **Props:**
 
 - `json?: any` - JSON data to send
+- `text?: string` - Plain text response
+- `html?: string` - HTML response
+- `headers?: Record<string, string>` - Headers to set on the response
+- `redirect?: string` - Redirect location (uses provided `status`)
 - `status?: number` - HTTP status code (default: 200)
+
+### File-based Routing (automatic)
+
+ReactServe automatically discovers routes from `<sourceRoot>/app/**`. By default it scans `src/app` for files named `route.(ts|tsx|js|jsx)` and registers them based on the folder structure.
+
+Filesystem to URL mapping:
+
+- Static names map 1:1
+- `[id]` -> `:id`
+- `[...slug]` -> `:slug` (single segment)
+- `[[...slug]]` -> `:slug` (single segment; base path does not match)
+- `(group)` directories are ignored in the URL but traversed; their `middleware.*` applies to children
+
+To change the source directory, entry, or base route filename, create `react-serve.config.ts` in your project root:
+
+```ts
+import type { ReactServeConfig } from "react-serve-js";
+
+const config: ReactServeConfig = {
+  // default is "src"
+  sourceRoot: "src",
+  // default is "index"; resolved as <sourceRoot>/<entry>.(tsx|ts|jsx|js)
+  entry: "index",
+  // default is "route"; per-directory route filename base
+  routeFileBase: "route",
+};
+
+export default config;
+```
+
+Global middleware can be declared once at `src/middleware.(ts|tsx|js|jsx)` as a default export of a single middleware or an array of middlewares. Directory-level middleware is supported via `middleware.(ts|tsx|js|jsx)` in each folder under `app/**`.
+
+Use the `<App>` component as your layout and, optionally, set a `globalPrefix` to mount all routes under a base path:
+
+```tsx
+import { App } from "react-serve-js";
+
+export default function Backend() {
+  return <App port={6969} cors={true} globalPrefix="/api" />;
+}
+```
 
 ## Hooks
 
@@ -214,6 +214,6 @@ Retrieve data from the request context (available in route handlers and middlewa
 - 🎯 **Type Safe** - Full TypeScript support
 - ⚡ **Fast** - Built on Express.js
 - 🧩 **Composable** - Use React patterns for API logic
-- �️ **Middleware Support** - Authentication, logging, and custom middleware
+- 🛡️ **Middleware Support** - Authentication, logging, and custom middleware
 - 🗂️ **Route Grouping** - Organize routes with shared prefixes
-- �📦 **Zero Config** - Works out of the box
+- 📦 **Zero Config** - Works out of the box

@@ -1,0 +1,28 @@
+{
+  "name": "react-serve-basic-fs-example",
+  "version": "1.0.0",
+  "description": "File-system routing example for ReactServe",
+  "main": "dist/backend.js",
+  "scripts": {
+    "dev": "react-serve dev",
+    "typecheck": "tsc --noEmit",
+    "build": "react-serve build",
+    "start": "react-serve start"
+  },
+  "keywords": [
+    "react-serve",
+    "example",
+    "file-system-routing"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "react-serve-js": "file:../../packages/react-serve-js",
+    "react": "^19.1.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.10",
+    "tsx": "^4.20.4",
+    "typescript": "^5.0.0"
+  }
+}

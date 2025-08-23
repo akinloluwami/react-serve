@@ -1,7 +1,15 @@
-import express, { Request, Response as ExpressResponse, RequestHandler } from "express";
+import express, {
+  Request,
+  Response as ExpressResponse,
+  RequestHandler,
+  json,
+} from "express";
 import { ReactNode } from "react";
-import { watch } from "fs";
+import { watch, readdirSync, statSync, existsSync } from "fs";
+import path from "path";
+import { pathToFileURL } from "url";
 import cors from "cors";
+import { createRequire } from "module";
 
 // Context to hold req/res for useRoute() and middleware context
 let routeContext: {
@@ -55,7 +63,240 @@ const routes: {
   handler: Function;
   middlewares: Middleware[];
 }[] = [];
-let appConfig: { port?: number; cors?: boolean | cors.CorsOptions } = {};
+let appConfig: {
+  port?: number;
+  cors?: boolean | cors.CorsOptions;
+  globalPrefix?: string;
+} = {};
+
+// --- File-based routing helpers ---
+function toExpressSegment(dirName: string): string {
+  // Route group directories are skipped in the URL path
+  if (dirName.startsWith("(") && dirName.endsWith(")")) return "";
+
+  // Catch-all segment: [...slug] -> :slug
+  const catchAllMatch = dirName.match(/^\[\.\.\.(.+)\]$/);
+  if (catchAllMatch) {
+    return `:${catchAllMatch[1]}`;
+  }
+
+  // Optional catch-all: [[...slug]] -> :slug
+  const optionalCatchAllMatch = dirName.match(/^\[\[\.\.\.(.+)\]\]$/);
+  if (optionalCatchAllMatch) {
+    return `:${optionalCatchAllMatch[1]}`;
+  }
+
+  // Dynamic segment: [id] -> :id
+  const dynamicMatch = dirName.match(/^\[(.+)\]$/);
+  if (dynamicMatch) {
+    return `:${dynamicMatch[1]}`;
+  }
+
+  return dirName;
+}
+
+function withOptionalPrefix(
+  prefix: string | undefined,
+  urlPath: string
+): string {
+  const p = prefix ? (prefix.startsWith("/") ? prefix : `/${prefix}`) : "";
+  const full = p + (urlPath === "/" ? "" : urlPath) || "/";
+  return full.replace(/\/+/g, "/");
+}
+
+function fileExistsVariations(basePathWithoutExt: string): string | null {
+  const candidates = [".tsx", ".ts", ".jsx", ".js"].map(
+    (ext) => basePathWithoutExt + ext
+  );
+  for (const file of candidates) {
+    if (existsSync(file)) return file;
+  }
+  return null;
+}
+
+type LoadedConfig = { sourceRoot: string; entry: string; routeFileBase: string };
+
+function loadReactServeConfigSync(): LoadedConfig {
+  const cwd = process.cwd();
+  const base = path.join(cwd, "react-serve.config");
+  const tryPaths = [
+    base + ".ts",
+    base + ".tsx",
+    base + ".js",
+    base + ".cjs",
+    base + ".mjs",
+  ];
+
+  for (const cfgPath of tryPaths) {
+    if (!existsSync(cfgPath)) continue;
+    try {
+      const requireFn = createRequire(__filename);
+      // Prefer require() to keep this loader synchronous; works under tsx/ts-node
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const mod = requireFn(cfgPath);
+      const conf = (mod && (mod.default || mod)) || {};
+      return {
+        sourceRoot: conf.sourceRoot || "src",
+        entry: conf.entry || "index",
+        routeFileBase: conf.routeFileBase || "route",
+      };
+    } catch (e: unknown) {
+      // Fallback to defaults on failure to load
+      console.warn(
+        "Warning: Failed to load react-serve.config from",
+        cfgPath,
+        "- using defaults. Error:",
+        (e instanceof Error && e.message) ? e.message : e
+      );
+      return { sourceRoot: "src", entry: "index", routeFileBase: "route" };
+    }
+  }
+
+  return { sourceRoot: "src", entry: "index", routeFileBase: "route" };
+}
+
+function createLazyMiddlewareFromModule(moduleFile: string): Middleware {
+  let loadedMiddlewares: Middleware[] | null = null;
+  return async (req, next) => {
+    if (!loadedMiddlewares) {
+      const url = pathToFileURL(moduleFile).href;
+      const mod: any = await import(url);
+      const exported =
+        mod.default ?? mod.use ?? mod.middleware ?? mod.middlewares;
+      if (!exported) {
+        // No middleware exported, just continue
+        return next();
+      }
+      loadedMiddlewares = Array.isArray(exported) ? exported : [exported];
+    }
+
+    let index = 0;
+    const run = async (): Promise<any> => {
+      if (index >= (loadedMiddlewares as Middleware[]).length) {
+        return next();
+      }
+      const current = (loadedMiddlewares as Middleware[])[index++];
+      return current(req, run);
+    };
+    return run();
+  };
+}
+
+function createFileRouteHandler(moduleFile: string) {
+  let cachedModule: any | null = null;
+  let cachedAllowed: string[] | null = null;
+
+  const load = async () => {
+    if (!cachedModule) {
+      const url = pathToFileURL(moduleFile).href;
+      cachedModule = await import(url);
+      const keys = Object.keys(cachedModule);
+      const httpMethods = [
+        "GET",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE",
+        "OPTIONS",
+        "HEAD",
+        "ALL",
+      ];
+      cachedAllowed = keys
+        .filter((k) => httpMethods.includes(k.toUpperCase()))
+        .map((k) => k.toUpperCase());
+      // Treat default export as GET if no explicit GET is provided
+      if (
+        !cachedAllowed.includes("GET") &&
+        typeof cachedModule.default === "function"
+      ) {
+        cachedAllowed.push("GET");
+      }
+    }
+  };
+
+  return async function handler() {
+    await load();
+    const { req } = useRoute();
+    const method = req.method.toUpperCase();
+
+    const fn: Function | undefined =
+      cachedModule[method] ||
+      (method === "GET" ? cachedModule.default : undefined);
+
+    if (!fn) {
+      const allow = (cachedAllowed || []).filter((m) => m !== "ALL");
+      return {
+        type: "Response",
+        props: {
+          status: 405,
+          headers: allow.length ? { Allow: allow.join(", ") } : undefined,
+          json: {
+            error: "Method Not Allowed",
+            message: `Method ${method} is not allowed for this route`,
+            allowed: allow.length ? allow : undefined,
+          },
+        },
+      };
+    }
+
+    return await fn();
+  };
+}
+
+function registerFileRoutesFromDirectory(
+  rootDir: string,
+  prefix: string | undefined,
+  currentDir: string,
+  urlSegments: string[],
+  inheritedMiddlewares: Middleware[],
+  routeFileBase: string
+): void {
+  // Load directory-level middleware if present
+  const middlewareFile = fileExistsVariations(
+    path.join(currentDir, "middleware")
+  );
+  const aggregatedMiddlewares = [...inheritedMiddlewares];
+  if (middlewareFile) {
+    aggregatedMiddlewares.push(createLazyMiddlewareFromModule(middlewareFile));
+  }
+
+  const routeFile = fileExistsVariations(
+    path.join(currentDir, routeFileBase)
+  );
+  if (routeFile) {
+    const expressPath = ("/" + urlSegments.filter(Boolean).join("/")).replace(
+      /\/+/g,
+      "/"
+    );
+    const fullPath = withOptionalPrefix(prefix, expressPath);
+
+    routes.push({
+      method: "all",
+      path: fullPath,
+      handler: createFileRouteHandler(routeFile),
+      middlewares: aggregatedMiddlewares,
+    });
+  }
+
+  // Traverse child directories
+  const entries = readdirSync(currentDir);
+  for (const entry of entries) {
+    const entryPath = path.join(currentDir, entry);
+    if (!statSync(entryPath).isDirectory()) continue;
+    if (entry.startsWith(".")) continue;
+
+    const segment = toExpressSegment(entry);
+    const nextSegments = segment ? [...urlSegments, segment] : [...urlSegments];
+    registerFileRoutesFromDirectory(
+      rootDir,
+      prefix,
+      entryPath,
+      nextSegments,
+      aggregatedMiddlewares,
+      routeFileBase
+    );
+  }
+}
 
 // Component processor
 function processElement(
@@ -89,7 +330,23 @@ function processElement(
         appConfig = {
           port: props.port || 9000,
           cors: props.cors,
+          globalPrefix: props.globalPrefix,
         };
+
+        const layoutPrefix = props.globalPrefix
+          ? `${pathPrefix}${props.globalPrefix}`
+          : pathPrefix;
+        const children = props.children;
+        if (children) {
+          if (Array.isArray(children)) {
+            children.forEach((child: any) =>
+              processElement(child, layoutPrefix, middlewares)
+            );
+          } else {
+            processElement(children, layoutPrefix, middlewares);
+          }
+        }
+        return;
       }
 
       if (
@@ -146,6 +403,7 @@ function processElement(
         return;
       }
 
+
       if (
         element.type === "Route" ||
         (element.type && element.type.name === "Route")
@@ -153,7 +411,9 @@ function processElement(
         const props = element.props || {};
         if (props.path && props.children) {
           if (!props.method) {
-            throw new Error(`Route with path "${props.path}" is missing a required "method" property`);
+            throw new Error(
+              `Route with path "${props.path}" is missing a required "method" property`
+            );
           }
           const fullPath = `${pathPrefix}${props.path}`;
 
@@ -200,6 +460,35 @@ export function serve(element: ReactNode) {
   // Process the React element tree to extract routes and config
   processElement(element);
 
+  // Auto-discover file-based routes
+  const { sourceRoot, routeFileBase } = loadReactServeConfigSync();
+  const sourceRootAbs = path.isAbsolute(sourceRoot)
+    ? sourceRoot
+    : path.join(process.cwd(), sourceRoot);
+
+  const globalMiddlewares: Middleware[] = [];
+  const globalMiddlewareFile = fileExistsVariations(
+    path.join(sourceRootAbs, "middleware")
+  );
+  if (globalMiddlewareFile) {
+    globalMiddlewares.push(
+      createLazyMiddlewareFromModule(globalMiddlewareFile)
+    );
+  }
+
+  // Determine the root directory for routes; scan only `${sourceRoot}/app`
+  const routesRoot = path.join(sourceRootAbs, "app");
+
+  // Register routes recursively starting at the selected root
+  registerFileRoutesFromDirectory(
+    routesRoot,
+    appConfig.globalPrefix,
+    routesRoot,
+    [],
+    globalMiddlewares,
+    routeFileBase || "route"
+  );
+
   const port = appConfig.port || 6969;
 
   // Express
@@ -212,10 +501,7 @@ export function serve(element: ReactNode) {
   }
 
   // Unified output handler to reduce duplication across methods
-  const sendResponseFromOutput = (
-    res: ExpressResponse,
-    output: any
-  ): void => {
+  const sendResponseFromOutput = (res: ExpressResponse, output: any): void => {
     if (!output) {
       if (!res.headersSent) {
         res.status(500).json({ error: "No response generated" });
@@ -225,17 +511,33 @@ export function serve(element: ReactNode) {
 
     if (typeof output === "object") {
       const isResponseElement = Boolean(
-        output.type && (output.type === "Response" || output.type?.name === "Response")
+        output.type &&
+          (output.type === "Response" || output.type?.name === "Response")
       );
 
       if (isResponseElement) {
-        const { status = 200, json } = output.props || {};
+        const { status = 200, json, text, html, headers, redirect } = output.props || {};
         res.status(status);
+        if (headers && typeof headers === "object") {
+          res.set(headers);
+        }
+        if (redirect) {
+          res.redirect(status, redirect);
+          return;
+        }
         if (json !== undefined) {
           res.json(json);
-        } else {
-          res.end();
+          return;
         }
+        if (text !== undefined) {
+          res.type("text/plain").send(String(text));
+          return;
+        }
+        if (html !== undefined) {
+          res.type("text/html").send(String(html));
+          return;
+        }
+        res.end();
         return;
       }
 
@@ -250,7 +552,10 @@ export function serve(element: ReactNode) {
   };
 
   // Shared request handler factory used for all HTTP methods
-  const createExpressHandler = (handler: Function, middlewares: Middleware[] = []) => {
+  const createExpressHandler = (
+    handler: Function,
+    middlewares: Middleware[] = []
+  ) => {
     const wrapped: RequestHandler = async (
       req: Request,
       res: ExpressResponse
@@ -310,7 +615,10 @@ export function serve(element: ReactNode) {
   for (const route of regularRoutes) {
     const method = route.method.toLowerCase();
 
-    const registrar: Record<string, (path: string, ...handlers: RequestHandler[]) => any> = {
+    const registrar: Record<
+      string,
+      (path: string, ...handlers: RequestHandler[]) => any
+    > = {
       get: app.get.bind(app),
       post: app.post.bind(app),
       put: app.put.bind(app),
@@ -323,34 +631,37 @@ export function serve(element: ReactNode) {
 
     const register = registrar[method];
     if (register) {
-      register(route.path, createExpressHandler(route.handler, route.middlewares));
+      register(
+        route.path,
+        createExpressHandler(route.handler, route.middlewares)
+      );
     } else {
       console.warn(`Unsupported HTTP method: ${route.method}`);
     }
   }
 
-app.use((req: Request, res: ExpressResponse, next: any) => {
-  const path = req.path;
-  if (methodsByPath[path] && !methodsByPath[path].includes(req.method)) {
-    res.set('Allow', methodsByPath[path].join(', '));
+  app.use((req: Request, res: ExpressResponse, next: any) => {
+    const path = req.path;
+    if (methodsByPath[path] && !methodsByPath[path].includes(req.method)) {
+      res.set("Allow", methodsByPath[path].join(", "));
 
-    console.log(
-      `\n🚫  [405 Method Not Allowed]\n` +
-      `   ✦ Path: ${path}\n` +
-      `   ✦ Tried: ${req.method}\n` +
-      `   ✦ Allowed: ${methodsByPath[path].join(', ')}\n`
-    );
+      console.log(
+        `\n🚫  [405 Method Not Allowed]\n` +
+          `   ✦ Path: ${path}\n` +
+          `   ✦ Tried: ${req.method}\n` +
+          `   ✦ Allowed: ${methodsByPath[path].join(", ")}\n`
+      );
 
-    res.status(405).json({
-      error: "Method Not Allowed",
-      message: `Method ${req.method} is not allowed for path ${path}`,
-      path,
-      method: req.method
-    });
-  } else {
-    next();
-  }
-});
+      res.status(405).json({
+        error: "Method Not Allowed",
+        message: `Method ${req.method} is not allowed for path ${path}`,
+        path,
+        method: req.method,
+      });
+    } else {
+      next();
+    }
+  });
 
   const hasCustomWildcard = wildcardRoutes.length > 0;
 
@@ -387,7 +698,8 @@ app.use((req: Request, res: ExpressResponse, next: any) => {
             sendResponseFromOutput(res, output);
           } catch (error) {
             console.error("Wildcard route handler error:", error);
-            if (!res.headersSent) res.status(500).json({ error: "Internal server error" });
+            if (!res.headersSent)
+              res.status(500).json({ error: "Internal server error" });
           } finally {
             routeContext = null;
           }

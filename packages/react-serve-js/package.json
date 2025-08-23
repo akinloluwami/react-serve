@@ -11,7 +11,13 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "dev:serve": "tsx src/dev-runner.tsx",
+    "cli:build": "tsc -p tsconfig.json",
+    "cli:dev": "tsx src/cli.ts"
+  },
+  "bin": {
+    "react-serve": "dist/cli.js"
   },
   "keywords": [
     "react",
@@ -30,6 +36,7 @@
   },
   "dependencies": {
     "@types/cors": "^2.8.19",
+    "commander": "^14.0.0",
     "cors": "^2.8.5",
     "express": "^5.1.0"
   },
