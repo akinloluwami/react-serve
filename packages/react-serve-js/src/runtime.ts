@@ -5,7 +5,8 @@ import express, {
 } from "express";
 import { ReactNode } from "react";
 import { watch, readdirSync, statSync, existsSync } from "fs";
-import { join, extname, basename } from "path";
+import { join, extname, basename, resolve } from "path";
+import { fileURLToPath } from "url";
 import cors from "cors";
 
 // Context to hold req/res for useRoute() and middleware context
@@ -98,12 +99,18 @@ async function scanRoutesDirectory(
   dir: string,
   basePath: string = ""
 ): Promise<void> {
-  if (!existsSync(dir)) return;
+  // Resolve the directory path relative to current working directory
+  const resolvedDir = resolve(dir);
+  console.log(`Scanning directory: ${resolvedDir}`);
+  if (!existsSync(resolvedDir)) {
+    console.warn(`Directory does not exist: ${resolvedDir}`);
+    return;
+  }
 
-  const items = readdirSync(dir);
+  const items = readdirSync(resolvedDir);
 
   for (const item of items) {
-    const fullPath = join(dir, item);
+    const fullPath = join(resolvedDir, item);
     const stat = statSync(fullPath);
 
     if (stat.isDirectory()) {
@@ -123,14 +130,25 @@ async function scanRoutesDirectory(
         // Import and register the route
         try {
           console.log(`Loading route from: ${fullPath}`);
-          // Use dynamic import for ES modules
-          const routeModule = await import(fullPath);
+          // Convert to absolute path and use file:// protocol for ES modules
+          const absolutePath = resolve(fullPath);
+          const fileUrl = `file://${absolutePath}`;
+          console.log(`Importing from: ${fileUrl}`);
+
+          const routeModule = await import(fileUrl);
           const handler =
             routeModule.default || routeModule.handler || routeModule;
 
           if (typeof handler === "function") {
-            const routePath =
-              fullRoutePath === "index" ? "/" : `/${fullRoutePath}`;
+            // Handle index files properly - they should map to the directory path
+            let routePath;
+            if (fullRoutePath === "index") {
+              routePath = "/";
+            } else if (fullRoutePath.endsWith("/index")) {
+              routePath = `/${fullRoutePath.replace("/index", "")}`;
+            } else {
+              routePath = `/${fullRoutePath}`;
+            }
             console.log(`Registered route: ${method} ${routePath}`);
             routes.push({
               method,
