@@ -54,15 +54,16 @@ export function Response({
   headers?: Record<string, string>;
   redirect?: string;
 }): React.ReactElement {
-  return { type: "Response", props: { json, status, text, html, headers, redirect } } as any;
+  return {
+    type: "Response",
+    props: { json, status, text, html, headers, redirect },
+  } as any;
 }
 
 export function Middleware({
   use,
 }: {
-  use:
-    | import("./runtime").Middleware
-    | import("./runtime").Middleware[];
+  use: import("./runtime").Middleware | import("./runtime").Middleware[];
 }): React.ReactElement {
   return { type: "Middleware", props: { use } } as any;
 }
@@ -82,7 +83,9 @@ export function FileRouter({
   middleware,
 }: {
   routesDir: string;
-  middleware?: import("./runtime").Middleware | import("./runtime").Middleware[];
+  middleware?:
+    | import("./runtime").Middleware
+    | import("./runtime").Middleware[];
 }): React.ReactElement {
   return { type: "FileRouter", props: { routesDir, middleware } } as any;
 }

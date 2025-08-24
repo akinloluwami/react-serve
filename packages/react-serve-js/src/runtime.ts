@@ -79,6 +79,11 @@ function parseRouteFromFilename(filename: string): {
   // Handle optional catch-all routes [[...param]]
   path = path.replace(/\[\[\.\.\.([^\]]+)\]\]/g, "*");
 
+  // Convert catch-all to Express.js format
+  if (path.includes("*")) {
+    path = "*";
+  }
+
   // Default to GET method
   let method = "GET";
 
@@ -101,11 +106,13 @@ async function scanRoutesDirectory(
 ): Promise<void> {
   // Resolve the directory path relative to current working directory
   const resolvedDir = resolve(dir);
-  console.log(`Scanning directory: ${resolvedDir}`);
   if (!existsSync(resolvedDir)) {
-    console.warn(`Directory does not exist: ${resolvedDir}`);
+    console.warn(`FileRouter: Directory does not exist: ${resolvedDir}`);
     return;
   }
+
+  // Process layout files for this directory
+  const layoutMiddlewares = await processLayoutFiles(resolvedDir);
 
   const items = readdirSync(resolvedDir);
 
@@ -124,16 +131,14 @@ async function scanRoutesDirectory(
         const { path: routePath, method } = parseRouteFromFilename(item);
         const fullRoutePath = basePath ? `${basePath}/${routePath}` : routePath;
 
-        // Skip layout and middleware files
-        if (item.startsWith("_") || item.startsWith(".")) continue;
+        // Skip hidden files but allow layout files
+        if (item.startsWith(".")) continue;
 
         // Import and register the route
         try {
-          console.log(`Loading route from: ${fullPath}`);
           // Convert to absolute path and use file:// protocol for ES modules
           const absolutePath = resolve(fullPath);
           const fileUrl = `file://${absolutePath}`;
-          console.log(`Importing from: ${fileUrl}`);
 
           const routeModule = await import(fileUrl);
           const handler =
@@ -149,20 +154,59 @@ async function scanRoutesDirectory(
             } else {
               routePath = `/${fullRoutePath}`;
             }
-            console.log(`Registered route: ${method} ${routePath}`);
             routes.push({
               method,
               path: routePath,
               handler,
-              middlewares: [],
+              middlewares: [...layoutMiddlewares],
             });
           }
         } catch (error) {
-          console.warn(`Failed to load route from ${fullPath}:`, error);
+          console.warn(
+            `FileRouter: Failed to load route from ${fullPath}:`,
+            error
+          );
         }
       }
     }
   }
+}
+
+// Process layout files in a directory
+async function processLayoutFiles(dir: string): Promise<Middleware[]> {
+  const layoutMiddlewares: Middleware[] = [];
+  const resolvedDir = resolve(dir);
+
+  if (!existsSync(resolvedDir)) return layoutMiddlewares;
+
+  const items = readdirSync(resolvedDir);
+
+  for (const item of items) {
+    if (
+      item === "_layout.tsx" ||
+      item === "_layout.js" ||
+      item === "_layout.ts" ||
+      item === "_layout.jsx"
+    ) {
+      const fullPath = join(resolvedDir, item);
+      try {
+        const layoutModule = await import(`file://${resolve(fullPath)}`);
+        if (
+          layoutModule.layoutMiddleware &&
+          typeof layoutModule.layoutMiddleware === "function"
+        ) {
+          layoutMiddlewares.push(layoutModule.layoutMiddleware);
+        }
+      } catch (error) {
+        console.warn(
+          `FileRouter: Failed to load layout from ${fullPath}:`,
+          error
+        );
+      }
+    }
+  }
+
+  return layoutMiddlewares;
 }
 
 // Component processor
@@ -262,7 +306,6 @@ async function processElement(
       ) {
         // Handle FileRouter component
         const props = element.props || {};
-        console.log("Processing FileRouter with routesDir:", props.routesDir);
         if (props.routesDir) {
           // Scan the routes directory for file-based routes
           await scanRoutesDirectory(props.routesDir);
@@ -345,7 +388,13 @@ export async function serve(element: ReactNode) {
 
   // Apply CORS if enabled in App props
   if (appConfig.cors) {
-    app.use(cors(appConfig.cors === true ? {} : appConfig.cors));
+    const corsOptions = appConfig.cors === true ? {
+      origin: true, // Allow all origins in development
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH', 'HEAD'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+    } : appConfig.cors;
+    app.use(cors(corsOptions));
   }
 
   // Unified output handler to reduce duplication across methods
