@@ -388,12 +388,27 @@ export async function serve(element: ReactNode) {
 
   // Apply CORS if enabled in App props
   if (appConfig.cors) {
-    const corsOptions = appConfig.cors === true ? {
-      origin: true, // Allow all origins in development
-      credentials: true,
-      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH', 'HEAD'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
-    } : appConfig.cors;
+    const corsOptions =
+      appConfig.cors === true
+        ? {
+            origin: true, // Allow all origins in development
+            credentials: true,
+            methods: [
+              "GET",
+              "POST",
+              "PUT",
+              "DELETE",
+              "OPTIONS",
+              "PATCH",
+              "HEAD",
+            ],
+            allowedHeaders: [
+              "Content-Type",
+              "Authorization",
+              "X-Requested-With",
+            ],
+          }
+        : appConfig.cors;
     app.use(cors(corsOptions));
   }
 
