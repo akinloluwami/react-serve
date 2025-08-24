@@ -1,6 +1,12 @@
-import express, { Request, Response as ExpressResponse, RequestHandler } from "express";
+import express, {
+  Request,
+  Response as ExpressResponse,
+  RequestHandler,
+} from "express";
 import { ReactNode } from "react";
-import { watch } from "fs";
+import { watch, readdirSync, statSync, existsSync } from "fs";
+import { join, extname, basename, resolve } from "path";
+import { fileURLToPath } from "url";
 import cors from "cors";
 
 // Context to hold req/res for useRoute() and middleware context
@@ -57,16 +63,164 @@ const routes: {
 }[] = [];
 let appConfig: { port?: number; cors?: boolean | cors.CorsOptions } = {};
 
+// File-based routing utilities
+function parseRouteFromFilename(filename: string): {
+  path: string;
+  method: string;
+} {
+  const name = basename(filename, extname(filename));
+
+  // Handle dynamic routes [param]
+  let path = name.replace(/\[([^\]]+)\]/g, ":$1");
+
+  // Handle catch-all routes [...param]
+  path = path.replace(/\[\.\.\.([^\]]+)\]/g, "*");
+
+  // Handle optional catch-all routes [[...param]]
+  path = path.replace(/\[\[\.\.\.([^\]]+)\]\]/g, "*");
+
+  // Convert catch-all to Express.js format
+  if (path.includes("*")) {
+    path = "*";
+  }
+
+  // Default to GET method
+  let method = "GET";
+
+  // Check for method suffix (e.g., users.post.tsx -> POST)
+  const methodMatch = name.match(
+    /\.(get|post|put|patch|delete|options|head)$/i
+  );
+  if (methodMatch) {
+    method = methodMatch[1].toUpperCase();
+    // Remove method suffix from path
+    path = path.replace(/\.(get|post|put|patch|delete|options|head)$/i, "");
+  }
+
+  return { path, method };
+}
+
+async function scanRoutesDirectory(
+  dir: string,
+  basePath: string = ""
+): Promise<void> {
+  // Resolve the directory path relative to current working directory
+  const resolvedDir = resolve(dir);
+  if (!existsSync(resolvedDir)) {
+    console.warn(`FileRouter: Directory does not exist: ${resolvedDir}`);
+    return;
+  }
+
+  // Process layout files for this directory
+  const layoutMiddlewares = await processLayoutFiles(resolvedDir);
+
+  const items = readdirSync(resolvedDir);
+
+  for (const item of items) {
+    const fullPath = join(resolvedDir, item);
+    const stat = statSync(fullPath);
+
+    if (stat.isDirectory()) {
+      // Handle route groups (directories)
+      const newBasePath = basePath ? `${basePath}/${item}` : item;
+      await scanRoutesDirectory(fullPath, newBasePath);
+    } else if (stat.isFile()) {
+      // Handle route files
+      const ext = extname(item);
+      if ([".ts", ".tsx", ".js", ".jsx"].includes(ext)) {
+        const { path: routePath, method } = parseRouteFromFilename(item);
+        const fullRoutePath = basePath ? `${basePath}/${routePath}` : routePath;
+
+        // Skip hidden files but allow layout files
+        if (item.startsWith(".")) continue;
+
+        // Import and register the route
+        try {
+          // Convert to absolute path and use file:// protocol for ES modules
+          const absolutePath = resolve(fullPath);
+          const fileUrl = `file://${absolutePath}`;
+
+          const routeModule = await import(fileUrl);
+          const handler =
+            routeModule.default || routeModule.handler || routeModule;
+
+          if (typeof handler === "function") {
+            // Handle index files properly - they should map to the directory path
+            let routePath;
+            if (fullRoutePath === "index") {
+              routePath = "/";
+            } else if (fullRoutePath.endsWith("/index")) {
+              routePath = `/${fullRoutePath.replace("/index", "")}`;
+            } else {
+              routePath = `/${fullRoutePath}`;
+            }
+            routes.push({
+              method,
+              path: routePath,
+              handler,
+              middlewares: [...layoutMiddlewares],
+            });
+          }
+        } catch (error) {
+          console.warn(
+            `FileRouter: Failed to load route from ${fullPath}:`,
+            error
+          );
+        }
+      }
+    }
+  }
+}
+
+// Process layout files in a directory
+async function processLayoutFiles(dir: string): Promise<Middleware[]> {
+  const layoutMiddlewares: Middleware[] = [];
+  const resolvedDir = resolve(dir);
+
+  if (!existsSync(resolvedDir)) return layoutMiddlewares;
+
+  const items = readdirSync(resolvedDir);
+
+  for (const item of items) {
+    if (
+      item === "_layout.tsx" ||
+      item === "_layout.js" ||
+      item === "_layout.ts" ||
+      item === "_layout.jsx"
+    ) {
+      const fullPath = join(resolvedDir, item);
+      try {
+        const layoutModule = await import(`file://${resolve(fullPath)}`);
+        if (
+          layoutModule.layoutMiddleware &&
+          typeof layoutModule.layoutMiddleware === "function"
+        ) {
+          layoutMiddlewares.push(layoutModule.layoutMiddleware);
+        }
+      } catch (error) {
+        console.warn(
+          `FileRouter: Failed to load layout from ${fullPath}:`,
+          error
+        );
+      }
+    }
+  }
+
+  return layoutMiddlewares;
+}
+
 // Component processor
-function processElement(
+async function processElement(
   element: any,
   pathPrefix: string = "",
   middlewares: Middleware[] = []
-): void {
+): Promise<void> {
   if (!element) return;
 
   if (Array.isArray(element)) {
-    element.forEach((el) => processElement(el, pathPrefix, middlewares));
+    for (const el of element) {
+      await processElement(el, pathPrefix, middlewares);
+    }
     return;
   }
 
@@ -75,7 +229,7 @@ function processElement(
     if (typeof element.type === "function") {
       // Call the function component to get its JSX result
       const result = element.type(element.props || {});
-      processElement(result, pathPrefix, middlewares);
+      await processElement(result, pathPrefix, middlewares);
       return;
     }
 
@@ -129,7 +283,7 @@ function processElement(
           });
 
           // Second pass: process all children with the accumulated middlewares
-          children.forEach((child: any) => {
+          for (const child of children) {
             // Skip middleware components in second pass since we already processed them
             if (
               !(
@@ -139,9 +293,33 @@ function processElement(
                   (child.type && child.type.name === "Middleware"))
               )
             ) {
-              processElement(child, groupPrefix, groupMiddlewares);
+              await processElement(child, groupPrefix, groupMiddlewares);
             }
-          });
+          }
+        }
+        return;
+      }
+
+      if (
+        element.type === "FileRouter" ||
+        (element.type && element.type.name === "FileRouter")
+      ) {
+        // Handle FileRouter component
+        const props = element.props || {};
+        if (props.routesDir) {
+          // Scan the routes directory for file-based routes
+          await scanRoutesDirectory(props.routesDir);
+
+          // Apply middleware to all file-based routes if provided
+          if (props.middleware) {
+            const fileRouterMiddlewares = Array.isArray(props.middleware)
+              ? props.middleware
+              : [props.middleware];
+
+            routes.forEach((route) => {
+              route.middlewares.push(...fileRouterMiddlewares);
+            });
+          }
         }
         return;
       }
@@ -153,7 +331,9 @@ function processElement(
         const props = element.props || {};
         if (props.path && props.children) {
           if (!props.method) {
-            throw new Error(`Route with path "${props.path}" is missing a required "method" property`);
+            throw new Error(
+              `Route with path "${props.path}" is missing a required "method" property`
+            );
           }
           const fullPath = `${pathPrefix}${props.path}`;
 
@@ -182,23 +362,23 @@ function processElement(
     // Process children for non-RouteGroup elements
     if (element.props && element.props.children) {
       if (Array.isArray(element.props.children)) {
-        element.props.children.forEach((child: any) =>
-          processElement(child, pathPrefix, middlewares)
-        );
+        for (const child of element.props.children) {
+          await processElement(child, pathPrefix, middlewares);
+        }
       } else {
-        processElement(element.props.children, pathPrefix, middlewares);
+        await processElement(element.props.children, pathPrefix, middlewares);
       }
     }
   }
 }
 
-export function serve(element: ReactNode) {
+export async function serve(element: ReactNode) {
   // Clear routes and config before processing
   routes.length = 0;
   appConfig = {};
 
   // Process the React element tree to extract routes and config
-  processElement(element);
+  await processElement(element);
 
   const port = appConfig.port || 6969;
 
@@ -208,14 +388,32 @@ export function serve(element: ReactNode) {
 
   // Apply CORS if enabled in App props
   if (appConfig.cors) {
-    app.use(cors(appConfig.cors === true ? {} : appConfig.cors));
+    const corsOptions =
+      appConfig.cors === true
+        ? {
+            origin: true, // Allow all origins in development
+            credentials: true,
+            methods: [
+              "GET",
+              "POST",
+              "PUT",
+              "DELETE",
+              "OPTIONS",
+              "PATCH",
+              "HEAD",
+            ],
+            allowedHeaders: [
+              "Content-Type",
+              "Authorization",
+              "X-Requested-With",
+            ],
+          }
+        : appConfig.cors;
+    app.use(cors(corsOptions));
   }
 
   // Unified output handler to reduce duplication across methods
-  const sendResponseFromOutput = (
-    res: ExpressResponse,
-    output: any
-  ): void => {
+  const sendResponseFromOutput = (res: ExpressResponse, output: any): void => {
     if (!output) {
       if (!res.headersSent) {
         res.status(500).json({ error: "No response generated" });
@@ -225,7 +423,8 @@ export function serve(element: ReactNode) {
 
     if (typeof output === "object") {
       const isResponseElement = Boolean(
-        output.type && (output.type === "Response" || output.type?.name === "Response")
+        output.type &&
+          (output.type === "Response" || output.type?.name === "Response")
       );
 
       if (isResponseElement) {
@@ -250,7 +449,10 @@ export function serve(element: ReactNode) {
   };
 
   // Shared request handler factory used for all HTTP methods
-  const createExpressHandler = (handler: Function, middlewares: Middleware[] = []) => {
+  const createExpressHandler = (
+    handler: Function,
+    middlewares: Middleware[] = []
+  ) => {
     const wrapped: RequestHandler = async (
       req: Request,
       res: ExpressResponse
@@ -310,7 +512,10 @@ export function serve(element: ReactNode) {
   for (const route of regularRoutes) {
     const method = route.method.toLowerCase();
 
-    const registrar: Record<string, (path: string, ...handlers: RequestHandler[]) => any> = {
+    const registrar: Record<
+      string,
+      (path: string, ...handlers: RequestHandler[]) => any
+    > = {
       get: app.get.bind(app),
       post: app.post.bind(app),
       put: app.put.bind(app),
@@ -323,34 +528,37 @@ export function serve(element: ReactNode) {
 
     const register = registrar[method];
     if (register) {
-      register(route.path, createExpressHandler(route.handler, route.middlewares));
+      register(
+        route.path,
+        createExpressHandler(route.handler, route.middlewares)
+      );
     } else {
       console.warn(`Unsupported HTTP method: ${route.method}`);
     }
   }
 
-app.use((req: Request, res: ExpressResponse, next: any) => {
-  const path = req.path;
-  if (methodsByPath[path] && !methodsByPath[path].includes(req.method)) {
-    res.set('Allow', methodsByPath[path].join(', '));
+  app.use((req: Request, res: ExpressResponse, next: any) => {
+    const path = req.path;
+    if (methodsByPath[path] && !methodsByPath[path].includes(req.method)) {
+      res.set("Allow", methodsByPath[path].join(", "));
 
-    console.log(
-      `\n🚫  [405 Method Not Allowed]\n` +
-      `   ✦ Path: ${path}\n` +
-      `   ✦ Tried: ${req.method}\n` +
-      `   ✦ Allowed: ${methodsByPath[path].join(', ')}\n`
-    );
+      console.log(
+        `\n🚫  [405 Method Not Allowed]\n` +
+          `   ✦ Path: ${path}\n` +
+          `   ✦ Tried: ${req.method}\n` +
+          `   ✦ Allowed: ${methodsByPath[path].join(", ")}\n`
+      );
 
-    res.status(405).json({
-      error: "Method Not Allowed",
-      message: `Method ${req.method} is not allowed for path ${path}`,
-      path,
-      method: req.method
-    });
-  } else {
-    next();
-  }
-});
+      res.status(405).json({
+        error: "Method Not Allowed",
+        message: `Method ${req.method} is not allowed for path ${path}`,
+        path,
+        method: req.method,
+      });
+    } else {
+      next();
+    }
+  });
 
   const hasCustomWildcard = wildcardRoutes.length > 0;
 
@@ -387,7 +595,8 @@ app.use((req: Request, res: ExpressResponse, next: any) => {
             sendResponseFromOutput(res, output);
           } catch (error) {
             console.error("Wildcard route handler error:", error);
-            if (!res.headersSent) res.status(500).json({ error: "Internal server error" });
+            if (!res.headersSent)
+              res.status(500).json({ error: "Internal server error" });
           } finally {
             routeContext = null;
           }

@@ -39,7 +39,7 @@ const authMiddleware: MiddlewareFunction = (req, next) => {
 
 function Backend() {
   return (
-    <App 
+    <App
       port={6969}
       cors={true} // Enable CORS for all routes
     >
@@ -116,10 +116,12 @@ const authMiddleware: MiddlewareFunction = (req, next) => {
 <RouteGroup prefix="/api">
   {/* Single middleware */}
   <Middleware use={authMiddleware} />
-  
+
   {/* Or multiple middleware as an array */}
   <RouteGroup prefix="/v2">
-    <Middleware use={[loggingMiddleware, rateLimitMiddleware, authMiddleware]} />
+    <Middleware
+      use={[loggingMiddleware, rateLimitMiddleware, authMiddleware]}
+    />
     <Route path="/users" method="GET">
       {() => {
         const user = useContext("user");
@@ -156,6 +158,60 @@ Groups routes together with a shared path prefix.
   </RouteGroup>
 </RouteGroup>
 ```
+
+### `<FileRouter>`
+
+Automatically creates routes based on your file structure (file-based routing).
+
+**Props:**
+
+- `routesDir: string` - Directory path containing route files
+- `middleware?: MiddlewareFunction | MiddlewareFunction[]` - Optional middleware to apply to all routes
+
+**Example:**
+
+```tsx
+<App port={6969}>
+  <FileRouter routesDir="./src/routes" middleware={loggingMiddleware} />
+</App>
+```
+
+**File Structure Example:**
+
+```
+src/routes/
+├── _layout.tsx            → Layout middleware for all routes
+├── index.tsx              → GET /
+├── [...slug].tsx          → Catch-all route
+├── users/
+│   ├── index.tsx          → GET /users
+│   ├── [id].tsx           → GET /users/:id
+│   └── users.post.tsx     → POST /users
+└── api/
+    └── health.tsx         → GET /api/health
+```
+
+**Layout Files:**
+Create `_layout.tsx` files to add middleware to all routes in a directory:
+
+```tsx
+// src/routes/_layout.tsx
+import { useSetContext } from "react-serve-js";
+
+export function layoutMiddleware(req: any, next: any) {
+  useSetContext("layout", { title: "My App" });
+  return next();
+}
+```
+
+**Route Patterns:**
+
+- `index.tsx` → `/`
+- `[param].tsx` → `/:param`
+- `file.get.tsx` → `GET /file`
+- `file.post.tsx` → `POST /file`
+- `[...slug].tsx` → Catch-all route for unmatched paths
+- `_layout.tsx` → Layout file with shared middleware
 
 ### `<Response>`
 
@@ -216,4 +272,5 @@ Retrieve data from the request context (available in route handlers and middlewa
 - 🧩 **Composable** - Use React patterns for API logic
 - �️ **Middleware Support** - Authentication, logging, and custom middleware
 - 🗂️ **Route Grouping** - Organize routes with shared prefixes
+- 📁 **File-Based Routing** - Automatic routes from file structure
 - �📦 **Zero Config** - Works out of the box
