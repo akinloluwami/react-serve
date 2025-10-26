@@ -15,13 +15,6 @@ npm install
 npm run dev
 ```
 
-```bash
-npx create-react-serve my-api
-cd my-api
-npm install
-npm run dev
-```
-
 ## Example
 
 ```tsx
