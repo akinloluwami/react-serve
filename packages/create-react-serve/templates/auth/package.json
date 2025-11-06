@@ -1,0 +1,41 @@
+{
+  "name": "my-react-serve-app",
+  "version": "1.0.0",
+  "description": "A ReactServe application with authentication",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx --watch src/index.tsx",
+    "start": "tsx src/index.tsx",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate dev",
+    "db:studio": "prisma studio",
+    "db:seed": "tsx prisma/seed.ts"
+  },
+  "keywords": [
+    "react-serve",
+    "api",
+    "backend",
+    "auth"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@prisma/client": "^5.7.0",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2",
+    "react": "^19.1.1",
+    "react-serve-js": "^0.6.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.5",
+    "@types/react": "^19.1.10",
+    "prisma": "^5.7.0",
+    "tsx": "^4.20.4",
+    "typescript": "^5.0.0"
+  }
+}
