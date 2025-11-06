@@ -18,14 +18,10 @@ program
 
 program
   .argument("[project-name]", "Name of the project")
-  .option(
-    "-t, --template <template>",
-    "Template to use (basic, blank, auth)",
-    "basic",
-  )
-  .action(async (projectName?: string, options?: { template: string }) => {
+  .option("-t, --template <template>", "Template to use (basic, blank, auth)")
+  .action(async (projectName?: string, options?: { template?: string }) => {
     try {
-      await createReactServeApp(projectName, options?.template || "basic");
+      await createReactServeApp(projectName, options?.template);
     } catch (error) {
       console.error("Error creating ReactServe app:", error);
       process.exit(1);

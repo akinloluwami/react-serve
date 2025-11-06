@@ -3,6 +3,7 @@ import { join, resolve } from "path";
 import { existsSync } from "fs";
 import readline from "readline";
 import https from "https";
+import prompts from "prompts";
 
 const rl = readline.createInterface({
   input: process.stdin,
@@ -52,9 +53,67 @@ async function getLatestVersion(packageName: string): Promise<string> {
   });
 }
 
+const TEMPLATES = {
+  basic: {
+    name: "Basic",
+    description: "REST API with user endpoints (recommended for beginners)",
+  },
+  auth: {
+    name: "Auth",
+    description:
+      "Complete authentication system with JWT, Prisma, and user management",
+  },
+  blank: {
+    name: "Blank",
+    description: "Minimal starter template",
+  },
+};
+
+async function selectTemplate(): Promise<string> {
+  const templateKeys = Object.keys(TEMPLATES) as Array<keyof typeof TEMPLATES>;
+
+  const response = await prompts({
+    type: "select",
+    name: "template",
+    message: "Select a template:",
+    choices: templateKeys.map((key) => ({
+      title: `${TEMPLATES[key].name} - ${TEMPLATES[key].description}`,
+      value: key,
+    })),
+    initial: 0,
+  });
+
+  if (response.template) {
+    return response.template;
+  }
+
+  // If cancelled, default to basic
+  console.log("\nNo template selected. Using 'basic' template.");
+  return "basic";
+}
+
+async function askLanguagePreference(): Promise<void> {
+  const response = await prompts({
+    type: "select",
+    name: "language",
+    message: "Choose your language:",
+    choices: [
+      { title: "TypeScript", value: "typescript" },
+      { title: "JavaScript", value: "javascript" },
+    ],
+    initial: 0,
+  });
+
+  if (response.language === "javascript") {
+    console.log("\n❌ Wrong answer. Use TypeScript.\n");
+  }
+
+  // Continue regardless - it's just a joke!
+}
+
 export async function createReactServeApp(
   projectName?: string,
-  template = "basic",
+  template?: string,
 ) {
   try {
     // Get project name if not provided
@@ -82,6 +141,14 @@ export async function createReactServeApp(
         process.exit(0);
       }
     }
+
+    // Ask for template if not provided
+    if (!template) {
+      template = await selectTemplate();
+    }
+
+    // Fun easter egg!
+    await askLanguagePreference();
 
     console.log(`\n🚀 Creating ReactServe app in ${projectPath}...\n`);
 
