@@ -18,41 +18,43 @@ function ask(question: string): Promise<string> {
 async function getLatestVersion(packageName: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const url = `https://registry.npmjs.org/${packageName}/latest`;
-    
-    const request = https.get(url, (res) => {
-      let data = '';
-      
-      res.on('data', (chunk) => {
-        data += chunk;
-      });
-      
-      res.on('end', () => {
-        try {
-          const packageInfo = JSON.parse(data);
-          if (packageInfo.version) {
-            resolve(packageInfo.version);
-          } else {
-            reject(new Error('Version not found in package info'));
+
+    const request = https
+      .get(url, (res) => {
+        let data = "";
+
+        res.on("data", (chunk) => {
+          data += chunk;
+        });
+
+        res.on("end", () => {
+          try {
+            const packageInfo = JSON.parse(data);
+            if (packageInfo.version) {
+              resolve(packageInfo.version);
+            } else {
+              reject(new Error("Version not found in package info"));
+            }
+          } catch (error) {
+            reject(error);
           }
-        } catch (error) {
-          reject(error);
-        }
+        });
+      })
+      .on("error", (error) => {
+        reject(error);
       });
-    }).on('error', (error) => {
-      reject(error);
-    });
 
     // Set timeout for the request
     request.setTimeout(5000, () => {
       request.destroy();
-      reject(new Error('Request timeout'));
+      reject(new Error("Request timeout"));
     });
   });
 }
 
 export async function createReactServeApp(
   projectName?: string,
-  template = "basic"
+  template = "basic",
 ) {
   try {
     // Get project name if not provided
@@ -70,7 +72,7 @@ export async function createReactServeApp(
     // Check if directory already exists
     if (existsSync(projectPath)) {
       const overwrite = await ask(
-        `Directory "${projectName}" already exists. Overwrite? (y/N): `
+        `Directory "${projectName}" already exists. Overwrite? (y/N): `,
       );
       if (
         overwrite.toLowerCase() !== "y" &&
@@ -93,8 +95,12 @@ export async function createReactServeApp(
       latestVersion = await getLatestVersion("react-serve-js");
       console.log(`✅ Latest version: ${latestVersion}\n`);
     } catch (error) {
-      console.warn("⚠️  Could not fetch latest version, using fallback version 0.6.0");
-      console.warn(`    Error: ${error instanceof Error ? error.message : String(error)}`);
+      console.warn(
+        "⚠️  Could not fetch latest version, using fallback version 0.6.0",
+      );
+      console.warn(
+        `    Error: ${error instanceof Error ? error.message : String(error)}`,
+      );
       latestVersion = "0.6.0";
     }
 
@@ -108,8 +114,17 @@ export async function createReactServeApp(
     console.log("Next steps:");
     console.log(`  cd ${projectName}`);
     console.log("  npm install");
+
+    if (template === "auth") {
+      console.log("  npm run db:generate");
+      console.log("  npm run db:push");
+      console.log("  npm run db:seed");
+    }
+
     console.log("  npm run dev");
-    console.log(`\n🌐 Your app will be running at http://localhost:6969\n`);
+
+    const port = template === "auth" ? "4000" : "6969";
+    console.log(`\n🌐 Your app will be running at http://localhost:${port}\n`);
   } finally {
     rl.close();
   }
@@ -143,12 +158,16 @@ async function copyDirectory(src: string, dest: string) {
   }
 }
 
-async function updatePackageJson(projectPath: string, projectName: string, latestVersion: string) {
+async function updatePackageJson(
+  projectPath: string,
+  projectName: string,
+  latestVersion: string,
+) {
   const packageJsonPath = join(projectPath, "package.json");
   const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8"));
 
   packageJson.name = projectName;
-  
+
   // Update react-serve-js to the latest version
   if (packageJson.dependencies && packageJson.dependencies["react-serve-js"]) {
     packageJson.dependencies["react-serve-js"] = `^${latestVersion}`;

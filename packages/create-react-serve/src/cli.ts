@@ -6,7 +6,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 
 const packageJson = JSON.parse(
-  readFileSync(join(__dirname, "../package.json"), "utf8")
+  readFileSync(join(__dirname, "../package.json"), "utf8"),
 );
 
 const program = new Command();
@@ -18,7 +18,11 @@ program
 
 program
   .argument("[project-name]", "Name of the project")
-  .option("-t, --template <template>", "Template to use", "basic")
+  .option(
+    "-t, --template <template>",
+    "Template to use (basic, blank, auth)",
+    "basic",
+  )
   .action(async (projectName?: string, options?: { template: string }) => {
     try {
       await createReactServeApp(projectName, options?.template || "basic");
