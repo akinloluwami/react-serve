@@ -1,0 +1,28 @@
+{
+  "name": "my-react-serve-app",
+  "version": "1.0.0",
+  "description": "A ReactServe application",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx --watch src/index.tsx",
+    "start": "tsx src/index.tsx",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "react-serve",
+    "api",
+    "backend"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "react-serve-js": "^0.6.0",
+    "react": "^19.1.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.10",
+    "tsx": "^4.20.4",
+    "typescript": "^5.0.0"
+  }
+}
