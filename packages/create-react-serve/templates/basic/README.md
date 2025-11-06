@@ -23,7 +23,6 @@ Your API will be running at http://localhost:6969
 - `GET /` - Welcome message
 - `GET /users` - List all users
 - `GET /users/:id` - Get user by ID
-- `GET /health` - Health check
 
 ## Project Structure
 
