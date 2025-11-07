@@ -8,7 +8,7 @@ import { tomorrow } from "react-syntax-highlighter/dist/esm/styles/prism";
 
 export function HeroSection() {
   return (
-    <div className="flex lg:items-center lg:px-32 px-5 mt-40 gap-x-32 lg:flex-row flex-col">
+    <div className="flex lg:items-center lg:px-32 px-5 mt-20 gap-x-32 lg:flex-row flex-col">
       <div className="">
         <h2 className="text-5xl font-light">
           The missing backend <br /> framework for React.
