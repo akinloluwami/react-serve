@@ -31,7 +31,12 @@ export function FaqSection() {
     {
       question: "WTF is this?",
       answer:
-        "ReactServe is a backend framework that transforms JSX components into Express.js routes. You write your API using React-like syntax with components like `<App />`, `<Route />`, and `<Middleware />`. The framework processes your JSX tree at runtime, extracts route definitions, and creates an Express server. It includes hooks like `useRoute()` and `useContext()` for accessing request data and sharing state between middleware.",
+        "ReactServe is a backend framework that transforms JSX components into Express.js routes.",
+    },
+    {
+      question: "Does it compile to HTML?",
+      answer:
+        "No. 💀💀💀 It compiles to Express.js route handlers. It's not a frontend framework.",
     },
     {
       question: "Is this secure?",
@@ -39,18 +44,18 @@ export function FaqSection() {
     },
     {
       question: "Why does this exist?",
-      answer: "[@xing_titanium](https://x.com/xing_titanium) was bored.",
+      answer: "[@xt42io](https://x.com/xt42io) was bored and curious.",
     },
   ];
 
   return (
     <div className="mt-42">
-      <h1 className="text-5xl font-light text-center">FAQ.</h1>
-      <div className="max-w-4xl mx-auto mt-12 px-8 space-y-6">
+      {/* <h1 className="text-5xl font-light text-center">FAQ.</h1> */}
+      <div className="max-w-4xl mx-auto mt-12 px-8 space-y-2">
         {faqs.map((faq, index) => (
-          <div key={index} className="border-t border-b border-white/10 p-8">
-            <h3 className="text-2xl font-light mb-4">{faq.question}</h3>
-            <p className="text-zinc-400 leading-relaxed">
+          <div key={index} className="border-white/10 p-8">
+            <h3 className="text-3xl font-light mb-4">{faq.question}</h3>
+            <p className="text-zinc-400 text-lg leading-relaxed">
               {parseAnswer(faq.answer)}
             </p>
           </div>
