@@ -16,6 +16,7 @@
     "@tanstack/react-router-devtools": "^1.131.5",
     "@tanstack/router-plugin": "^1.121.2",
     "@types/react-syntax-highlighter": "^15.5.13",
+    "posthog-js": "^1.289.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-icons": "^5.5.0",
