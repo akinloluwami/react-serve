@@ -1,6 +1,6 @@
 {
   "name": "react-serve-js",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "React-style backend framework for building APIs with JSX",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
