@@ -12,12 +12,14 @@ export function App({
   children,
   port,
   cors,
+  parseBody,
 }: {
   children: any;
   port?: number;
   cors?: boolean | CorsOptions;
+  parseBody?: boolean;
 }): React.ReactElement {
-  return { type: "App", props: { children, port, cors } } as any;
+  return { type: "App", props: { children, port, cors, parseBody } } as any;
 }
 
 export function Route({
@@ -25,6 +27,7 @@ export function Route({
   path,
   method,
   middleware,
+  parseBody,
 }: {
   children: any;
   path: string;
@@ -32,10 +35,11 @@ export function Route({
   middleware?:
     | import("./runtime").Middleware
     | import("./runtime").Middleware[];
+  parseBody?: boolean;
 }): React.ReactElement {
   return {
     type: "Route",
-    props: { children, path, method, middleware },
+    props: { children, path, method, middleware, parseBody },
   } as any;
 }
 
@@ -54,15 +58,16 @@ export function Response({
   headers?: Record<string, string>;
   redirect?: string;
 }): React.ReactElement {
-  return { type: "Response", props: { json, status, text, html, headers, redirect } } as any;
+  return {
+    type: "Response",
+    props: { json, status, text, html, headers, redirect },
+  } as any;
 }
 
 export function Middleware({
   use,
 }: {
-  use:
-    | import("./runtime").Middleware
-    | import("./runtime").Middleware[];
+  use: import("./runtime").Middleware | import("./runtime").Middleware[];
 }): React.ReactElement {
   return { type: "Middleware", props: { use } } as any;
 }
@@ -70,9 +75,11 @@ export function Middleware({
 export function RouteGroup({
   children,
   prefix,
+  parseBody,
 }: {
   children: any;
   prefix?: string;
+  parseBody?: boolean;
 }): React.ReactElement {
-  return { type: "RouteGroup", props: { children, prefix } } as any;
+  return { type: "RouteGroup", props: { children, prefix, parseBody } } as any;
 }

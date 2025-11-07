@@ -58,19 +58,27 @@ const routes: {
   path: string;
   handler: Function;
   middlewares: Middleware[];
+  parseBody: boolean;
 }[] = [];
-let appConfig: { port?: number; cors?: boolean | cors.CorsOptions } = {};
+let appConfig: {
+  port?: number;
+  cors?: boolean | cors.CorsOptions;
+  parseBody?: boolean;
+} = {};
 
 // Component processor
 function processElement(
   element: any,
   pathPrefix: string = "",
-  middlewares: Middleware[] = []
+  middlewares: Middleware[] = [],
+  parseBodyInherited: boolean = false,
 ): void {
   if (!element) return;
 
   if (Array.isArray(element)) {
-    element.forEach((el) => processElement(el, pathPrefix, middlewares));
+    element.forEach((el) =>
+      processElement(el, pathPrefix, middlewares, parseBodyInherited),
+    );
     return;
   }
 
@@ -79,7 +87,7 @@ function processElement(
     if (typeof element.type === "function") {
       // Call the function component to get its JSX result
       const result = element.type(element.props || {});
-      processElement(result, pathPrefix, middlewares);
+      processElement(result, pathPrefix, middlewares, parseBodyInherited);
       return;
     }
 
@@ -93,6 +101,7 @@ function processElement(
         appConfig = {
           port: props.port || 9000,
           cors: props.cors,
+          parseBody: props.parseBody,
         };
       }
 
@@ -105,6 +114,10 @@ function processElement(
         const groupPrefix = props.prefix
           ? `${pathPrefix}${props.prefix}`
           : pathPrefix;
+
+        // Determine parseBody for this group
+        const groupParseBody =
+          props.parseBody !== undefined ? props.parseBody : parseBodyInherited;
 
         // Process children to collect middlewares and routes
         if (props.children) {
@@ -143,7 +156,12 @@ function processElement(
                   (child.type && child.type.name === "Middleware"))
               )
             ) {
-              processElement(child, groupPrefix, groupMiddlewares);
+              processElement(
+                child,
+                groupPrefix,
+                groupMiddlewares,
+                groupParseBody,
+              );
             }
           });
         }
@@ -158,7 +176,7 @@ function processElement(
         if (props.path && props.children) {
           if (!props.method) {
             throw new Error(
-              `Route with path "${props.path}" is missing a required "method" property`
+              `Route with path "${props.path}" is missing a required "method" property`,
             );
           }
           const fullPath = `${pathPrefix}${props.path}`;
@@ -174,11 +192,18 @@ function processElement(
             }
           }
 
+          // Determine parseBody for this route
+          const routeParseBody =
+            props.parseBody !== undefined
+              ? props.parseBody
+              : parseBodyInherited;
+
           routes.push({
             method: props.method.toLowerCase(),
             path: fullPath,
             handler: props.children,
             middlewares: routeMiddlewares,
+            parseBody: routeParseBody,
           });
         }
         return;
@@ -189,10 +214,15 @@ function processElement(
     if (element.props && element.props.children) {
       if (Array.isArray(element.props.children)) {
         element.props.children.forEach((child: any) =>
-          processElement(child, pathPrefix, middlewares)
+          processElement(child, pathPrefix, middlewares, parseBodyInherited),
         );
       } else {
-        processElement(element.props.children, pathPrefix, middlewares);
+        processElement(
+          element.props.children,
+          pathPrefix,
+          middlewares,
+          parseBodyInherited,
+        );
       }
     }
   }
@@ -204,17 +234,21 @@ export function serve(element: ReactNode) {
   appConfig = {};
 
   // Process the React element tree to extract routes and config
-  processElement(element);
+  processElement(element, "", [], false);
 
   const port = appConfig.port || 6969;
 
   // Express
   const app = express();
-  app.use(express.json());
 
   // Apply CORS if enabled in App props
   if (appConfig.cors) {
     app.use(cors(appConfig.cors === true ? {} : appConfig.cors));
+  }
+
+  // Only apply global body parsing if parseBody is true at App level
+  if (appConfig.parseBody) {
+    app.use(express.json());
   }
 
   // Unified output handler to reduce duplication across methods
@@ -229,7 +263,7 @@ export function serve(element: ReactNode) {
     if (typeof output === "object") {
       const isResponseElement = Boolean(
         output.type &&
-          (output.type === "Response" || output.type?.name === "Response")
+          (output.type === "Response" || output.type?.name === "Response"),
       );
 
       if (isResponseElement) {
@@ -256,11 +290,12 @@ export function serve(element: ReactNode) {
   // Shared request handler factory used for all HTTP methods
   const createExpressHandler = (
     handler: Function,
-    middlewares: Middleware[] = []
+    middlewares: Middleware[] = [],
+    parseBody: boolean = false,
   ) => {
     const wrapped: RequestHandler = async (
       req: Request,
-      res: ExpressResponse
+      res: ExpressResponse,
     ) => {
       routeContext = {
         req,
@@ -333,10 +368,15 @@ export function serve(element: ReactNode) {
 
     const register = registrar[method];
     if (register) {
-      register(
-        route.path,
-        createExpressHandler(route.handler, route.middlewares)
+      // Apply body parsing middleware per route if needed and not globally enabled
+      const handlers: RequestHandler[] = [];
+      if (route.parseBody && !appConfig.parseBody) {
+        handlers.push(express.json());
+      }
+      handlers.push(
+        createExpressHandler(route.handler, route.middlewares, route.parseBody),
       );
+      register(route.path, ...handlers);
     } else {
       console.warn(`Unsupported HTTP method: ${route.method}`);
     }
@@ -351,7 +391,7 @@ export function serve(element: ReactNode) {
         `\n🚫  [405 Method Not Allowed]\n` +
           `   ✦ Path: ${path}\n` +
           `   ✦ Tried: ${req.method}\n` +
-          `   ✦ Allowed: ${methodsByPath[path].join(", ")}\n`
+          `   ✦ Allowed: ${methodsByPath[path].join(", ")}\n`,
       );
 
       res.status(405).json({
@@ -374,9 +414,19 @@ export function serve(element: ReactNode) {
       const methodSpecificWildcardHandler = async (
         req: Request,
         res: ExpressResponse,
-        next: any
+        next: any,
       ) => {
         if (method === "all" || req.method.toLowerCase() === method) {
+          // Apply body parsing if needed for wildcard routes
+          if (route.parseBody && !appConfig.parseBody) {
+            await new Promise<void>((resolve, reject) => {
+              express.json()(req, res, (err?: any) => {
+                if (err) reject(err);
+                else resolve();
+              });
+            });
+          }
+
           routeContext = {
             req,
             res,
