@@ -1,4 +1,9 @@
-import { App, Route, RouteGroup, Middleware } from "react-serve-js";
+import {
+  App as ReactServeApp,
+  Route,
+  RouteGroup,
+  Middleware,
+} from "react-serve-js";
 import { PORT } from "./config";
 import { authMiddleware, loggingMiddleware } from "./middleware";
 import {
@@ -11,7 +16,7 @@ import { GetAllUsersHandler, GetUserByIdHandler } from "./routes/users";
 
 export default function App() {
   return (
-    <App port={PORT} cors={true}>
+    <ReactServeApp port={PORT} cors={true} parseBody={true}>
       {/* Health check */}
       <Route path="/" method="GET">
         {async () => {
@@ -70,6 +75,6 @@ export default function App() {
           {GetUserByIdHandler}
         </Route>
       </RouteGroup>
-    </App>
+    </ReactServeApp>
   );
 }

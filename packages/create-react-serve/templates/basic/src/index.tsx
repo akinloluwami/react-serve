@@ -7,7 +7,7 @@ const users = [
 
 function Backend() {
   return (
-    <App port={6969}>
+    <App port={6969} parseBody={true}>
       <Route path="/" method="GET">
         {async () => {
           return <Response json={{ message: "Welcome to ReactServe!" }} />;
