@@ -6,7 +6,7 @@ export function GitHubSection() {
       <div className="max-w-4xl mx-auto text-center px-8">
         <h2 className="text-4xl font-light mb-6">⭐ Star on GitHub</h2>
         <p className="text-zinc-400 text-lg mb-8 leading-relaxed">
-          Either you think it's cool or cursed.
+          Do you think it's cool or cursed? Show some love either way.
         </p>
         <a
           href="https://github.com/akinloluwami/react-serve"
