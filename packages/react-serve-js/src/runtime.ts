@@ -1,31 +1,34 @@
+import cors from "cors";
 import express, {
-  Request,
   Response as ExpressResponse,
+  Request,
   RequestHandler,
 } from "express";
-import { ReactNode } from "react";
 import { watch } from "fs";
-import cors from "cors";
+import { ReactNode } from "react";
+import logger from "./logger";
 
 // Context to hold req/res for useRoute() and middleware context
-let routeContext: {
+interface RouteContext {
   req: Request;
   res: ExpressResponse;
-  params: any;
-  query: any;
-  body: any;
-  middlewareContext: Map<string, any>;
-} | null = null;
+  params: Record<string, unknown>;
+  query: Record<string, unknown> | unknown;
+  body: unknown;
+  middlewareContext: Map<string, unknown>;
+}
+
+let routeContext: RouteContext | null = null;
 
 // Global context that can be used from anywhere
-const globalContext = new Map<string, any>();
+const globalContext = new Map<string, unknown>();
 
 export function useRoute() {
   if (!routeContext) throw new Error("useRoute must be used inside a Route");
   return routeContext;
 }
 
-export function useSetContext(key: string, value: any) {
+export function useSetContext(key: string, value: unknown) {
   if (routeContext) {
     // If we're inside a route/middleware, use the route context
     routeContext.middlewareContext.set(key, value);
@@ -50,7 +53,10 @@ export function useContext(key: string) {
 }
 
 // Middleware type
-export type Middleware = (req: Request, next: () => any) => any;
+export type Middleware = (
+  req: Request,
+  next: () => Promise<unknown>
+) => Promise<unknown> | unknown;
 
 // Internal store for routes, middlewares and config
 const routes: {
@@ -63,7 +69,7 @@ let appConfig: { port?: number; cors?: boolean | cors.CorsOptions } = {};
 
 // Component processor
 function processElement(
-  element: any,
+  element: unknown,
   pathPrefix: string = "",
   middlewares: Middleware[] = []
 ): void {
@@ -74,22 +80,21 @@ function processElement(
     return;
   }
 
-  if (typeof element === "object") {
+  if (typeof element === "object" && element !== null) {
     // Handle React elements with function components
-    if (typeof element.type === "function") {
+    // element shape is dynamic (type/props), use runtime casts
+    const el: any = element;
+    if (typeof el.type === "function") {
       // Call the function component to get its JSX result
-      const result = element.type(element.props || {});
+      const result = el.type(el.props || {});
       processElement(result, pathPrefix, middlewares);
       return;
     }
 
-    if (element.type) {
-      if (
-        element.type === "App" ||
-        (element.type && element.type.name === "App")
-      ) {
+    if (el.type) {
+      if (el.type === "App" || (el.type && el.type.name === "App")) {
         // Extract app configuration
-        const props = element.props || {};
+        const props = el.props || {};
         appConfig = {
           port: props.port || 9000,
           cors: props.cors,
@@ -97,11 +102,11 @@ function processElement(
       }
 
       if (
-        element.type === "RouteGroup" ||
-        (element.type && element.type.name === "RouteGroup")
+        el.type === "RouteGroup" ||
+        (el.type && el.type.name === "RouteGroup")
       ) {
         // Handle RouteGroup component
-        const props = element.props || {};
+        const props = el.props || {};
         const groupPrefix = props.prefix
           ? `${pathPrefix}${props.prefix}`
           : pathPrefix;
@@ -150,11 +155,8 @@ function processElement(
         return;
       }
 
-      if (
-        element.type === "Route" ||
-        (element.type && element.type.name === "Route")
-      ) {
-        const props = element.props || {};
+      if (el.type === "Route" || (el.type && el.type.name === "Route")) {
+        const props = el.props || {};
         if (props.path && props.children) {
           if (!props.method) {
             throw new Error(
@@ -186,14 +188,13 @@ function processElement(
     }
 
     // Process children for non-RouteGroup elements
-    if (element.props && element.props.children) {
-      if (Array.isArray(element.props.children)) {
-        element.props.children.forEach((child: any) =>
-          processElement(child, pathPrefix, middlewares)
-        );
-      } else {
-        processElement(element.props.children, pathPrefix, middlewares);
-      }
+    if (el.props && el.props.children) {
+      const children = Array.isArray(el.props.children)
+        ? el.props.children
+        : [el.props.children];
+      children.forEach((child: any) =>
+        processElement(child, pathPrefix, middlewares)
+      );
     }
   }
 }
@@ -265,10 +266,10 @@ export function serve(element: ReactNode) {
       routeContext = {
         req,
         res,
-        params: req.params,
-        query: req.query,
+        params: req.params as Record<string, unknown>,
+        query: req.query as Record<string, unknown>,
         body: req.body,
-        middlewareContext: new Map<string, any>(),
+        middlewareContext: new Map<string, unknown>(),
       };
 
       try {
@@ -288,7 +289,7 @@ export function serve(element: ReactNode) {
         const output = await executeNextMiddleware();
         sendResponseFromOutput(res, output);
       } catch (error) {
-        console.error("Route handler error:", error);
+        logger.error("Route handler error:", error);
         if (!res.headersSent) {
           res.status(500).json({ error: "Internal server error" });
         }
@@ -338,7 +339,7 @@ export function serve(element: ReactNode) {
         createExpressHandler(route.handler, route.middlewares)
       );
     } else {
-      console.warn(`Unsupported HTTP method: ${route.method}`);
+      logger.warn(`Unsupported HTTP method: ${route.method}`);
     }
   }
 
@@ -347,7 +348,7 @@ export function serve(element: ReactNode) {
     if (methodsByPath[path] && !methodsByPath[path].includes(req.method)) {
       res.set("Allow", methodsByPath[path].join(", "));
 
-      console.log(
+      logger.warn(
         `\n🚫  [405 Method Not Allowed]\n` +
           `   ✦ Path: ${path}\n` +
           `   ✦ Tried: ${req.method}\n` +
@@ -380,10 +381,10 @@ export function serve(element: ReactNode) {
           routeContext = {
             req,
             res,
-            params: req.params,
-            query: req.query,
+            params: req.params as Record<string, unknown>,
+            query: req.query as Record<string, unknown>,
             body: req.body,
-            middlewareContext: new Map<string, any>(),
+            middlewareContext: new Map<string, unknown>(),
           };
           try {
             let middlewareIndex = 0;
@@ -399,7 +400,7 @@ export function serve(element: ReactNode) {
             const output = await executeNextMiddleware();
             sendResponseFromOutput(res, output);
           } catch (error) {
-            console.error("Wildcard route handler error:", error);
+            logger.error("Wildcard route handler error:", error);
             if (!res.headersSent)
               res.status(500).json({ error: "Internal server error" });
           } finally {
@@ -425,14 +426,14 @@ export function serve(element: ReactNode) {
   }
 
   const server = app.listen(port, () => {
-    console.log(`🚀 ReactServe running at http://localhost:${port}`);
+    logger.info(`🚀 ReactServe running at http://localhost:${port}`);
     if (process.env.NODE_ENV !== "production") {
-      console.log("🔥 Hot reload enabled - watching for file changes...");
+      logger.info("🔥 Hot reload enabled - watching for file changes...");
     }
   });
 
   server.on("error", (err) => {
-    console.error("Server error:", err);
+    logger.error("Server error:", err);
   });
 
   // Hot reload
@@ -446,7 +447,7 @@ export function serve(element: ReactNode) {
           !filename.includes("node_modules") &&
           !filename.includes(".git")
         ) {
-          console.log(`🔄 File changed: ${filename} - Restarting server...`);
+          logger.debug(`🔄 File changed: ${filename} - Restarting server...`);
           server.close(() => {
             process.exit(0);
           });
