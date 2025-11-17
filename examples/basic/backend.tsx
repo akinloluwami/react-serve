@@ -11,6 +11,7 @@ import {
   type MiddlewareFunction,
   //@ts-ignore
 } from "../../packages/react-serve-js/src";
+import logger from "../../packages/react-serve-js/src/logger";
 
 const mockUsers = [
   { id: 1, name: "John Doe", email: "john@example.com" },
@@ -44,7 +45,7 @@ const authMiddleware: MiddlewareFunction = (req, next) => {
 
 // Logging middleware example
 const loggingMiddleware: MiddlewareFunction = (req, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  logger.info(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
 
   // Add request timestamp to context
   useSetContext("requestTimestamp", Date.now());
@@ -54,7 +55,7 @@ const loggingMiddleware: MiddlewareFunction = (req, next) => {
 
 // Route-specific middleware example
 const slowRouteMiddleware: MiddlewareFunction = (req, next) => {
-  console.log(`⏱️ Slow route accessed: ${req.path}`);
+  logger.info(`⏱️ Slow route accessed: ${req.path}`);
 
   // Simulate some processing time
   useSetContext("processStartTime", Date.now());
@@ -64,9 +65,7 @@ const slowRouteMiddleware: MiddlewareFunction = (req, next) => {
 
 // Another route-specific middleware
 const adminLogMiddleware: MiddlewareFunction = (req, next) => {
-  console.log(
-    `🔐 Admin route accessed: ${req.path} at ${new Date().toISOString()}`
-  );
+  logger.info(`🔐 Admin route accessed: ${req.path} at ${new Date().toISOString()}`);
 
   useSetContext("adminAccess", true);
 
@@ -94,7 +93,7 @@ export default function Backend() {
       {/* Route with individual middleware */}
       <Route path="/slow" method="GET" middleware={slowRouteMiddleware}>
         {async () => {
-          const processStart = useContext("processStartTime");
+          const processStart = (useContext("processStartTime") as number) || 0;
           const processingTime = Date.now() - processStart;
 
           return (
@@ -208,12 +207,12 @@ export default function Backend() {
 
         <Route path="/me" method="GET">
           {async () => {
-            const user = useContext("user");
+            const user = useContext("user") as Record<string, any> | null;
             const timestamp = useContext("requestTimestamp");
             return (
               <Response
                 json={{
-                  ...user,
+                  ...(user ?? {}),
                   requestedAt: timestamp,
                 }}
               />
